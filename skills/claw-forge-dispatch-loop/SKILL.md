@@ -15,14 +15,27 @@ tool calls (one per ready task), collects results, and loops until the DAG is fu
 drained. All agent invocations bill against the host session's Pro/Max pool — no
 `claude_agent_sdk` imports anywhere.
 
+## Parameters
+
+Callers (e.g. `/claw-forge run`) may pass these optional parameters:
+
+- **features** — list of feature IDs to restrict execution to (empty = all tasks)
+- **max_concurrency** — integer wave batch size override (`null` = read from sidecar)
+
 ## Steps
 
-1. Read `MAX_BATCH` from sidecar config:
-   `claw-forge state status --json | jq -r '.max_concurrency'`
+1. Determine `MAX_BATCH`:
+   - If `max_concurrency` parameter is non-null, use it directly.
+   - Otherwise: `claw-forge state status --json | jq -r '.max_concurrency'`
 
 2. **Query the next wave:**
-   `claw-forge state ready --json --limit $MAX_BATCH`
-   If the batch is empty, display the per-wave dispatch summary and exit with code 0.
+
+   ```bash
+   claw-forge state ready --json --limit $MAX_BATCH [--features <ids>]
+   ```
+
+   Include `--features <ids>` only when the `features` parameter is non-empty.
+   If the batch is empty, print the final dispatch summary (see Display) and exit with code 0.
 
 3. **Pre-dispatch** (for each task in the batch):
    a. Claim files:
@@ -58,13 +71,31 @@ drained. All agent invocations bill against the host session's Pro/Max pool — 
         `claw-forge state patch ${task.id} --status failed --error '${result.error}' --json`
    d. Release file claim: `claw-forge file-release ${task.id}`
 
-6. Return to step 2.
+6. **Display wave summary** — after all tasks in the wave are collected, print one line:
+
+   ```
+   Wave <N>  dispatched=<d>  completed=<c>  failed=<f>  deferred=<r>
+   ```
+
+7. Return to step 2.
+
+## Display
+
+After the final wave (step 2 returns an empty batch), print a separator and totals:
+
+```
+────────────────────────────────────────────────────────
+Total  dispatched=<D>  completed=<C>  failed=<F>
+```
+
+Then exit with code 0.
 
 ## Concurrency
 
-`MAX_BATCH` defaults to `agent.max_concurrency` from `claw-forge.yaml`. All tasks in
-a wave are dispatched in a **single assistant response** as parallel Task calls; the
-host waits until every subagent returns before processing results.
+`MAX_BATCH` defaults to `agent.max_concurrency` from `claw-forge.yaml` (overridable via
+the `max_concurrency` parameter). All tasks in a wave are dispatched in a **single
+assistant response** as parallel Task calls; the host waits until every subagent returns
+before processing results.
 
 The sidecar's shape-aware scheduler ensures at most one `shape="core"` task runs per
 wave — `claw-forge state ready` enforces this transparently.
