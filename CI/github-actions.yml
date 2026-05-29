@@ -1,0 +1,15 @@
+name: claw-forge plugin CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  skill-structural-self-tests:
+    name: Skill structural self-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run skill structural fixtures
+        run: sh tests/skills/run-all.sh
