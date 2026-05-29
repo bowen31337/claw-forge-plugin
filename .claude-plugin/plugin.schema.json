@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://claude.ai/schemas/plugin-manifest/v1",
+  "title": "Claude Code Plugin Manifest",
+  "description": "Manifest schema for Claude Code plugins (.claude-plugin/plugin.json)",
+  "type": "object",
+  "required": ["name", "version", "license", "author", "homepage", "repository", "keywords"],
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Plugin identifier (lowercase letters, digits, hyphens)",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+    },
+    "version": {
+      "type": "string",
+      "description": "SemVer version string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier",
+      "minLength": 1
+    },
+    "author": {
+      "description": "Plugin author — string or object with name field",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "email": {"type": "string"},
+            "url": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "homepage": {
+      "type": "string",
+      "description": "URL of the plugin homepage",
+      "minLength": 1
+    },
+    "repository": {
+      "description": "Source repository — string URL or object with type and url",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "required": ["type", "url"],
+          "properties": {
+            "type": {"type": "string"},
+            "url": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "type": "array",
+      "description": "Search keywords for the plugin marketplace",
+      "items": {"type": "string"},
+      "minItems": 1
+    }
+  }
+}
