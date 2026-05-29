@@ -1,6 +1,6 @@
 ---
 name: claw-forge-boundaries-refactor
-description: Sequential refactor loop applying one canonical hotspot pattern at a time
+description: Sequential refactor loop applying one canonical hotspot pattern at a time; routes each apply to the boundaries-refactor subagent and displays per-hotspot verdict
 triggers:
   - claw-forge-boundaries-refactor
   - /claw-forge boundaries-apply
@@ -9,9 +9,11 @@ triggers:
 ## Overview
 
 This skill drives the sequential refactor loop used by `/claw-forge boundaries-apply`.
-It receives a hotspot path from the boundaries audit report and applies one of four
-canonical refactor patterns: `registry`, `split`, `extract_collaborators`, or
-`route_table`. Each apply is confirmed by the project's test suite before proceeding.
+It reads the boundaries audit report for the target hotspot, selects the recommended
+pattern, and routes execution to the `boundaries-refactor` subagent to perform the
+actual edit. The four canonical patterns are: `registry`, `split`,
+`extract_collaborators`, and `route_table`. The skill displays the per-hotspot refactor
+verdict once the subagent returns.
 
 ## Steps
 
@@ -19,7 +21,7 @@ canonical refactor patterns: `registry`, `split`, `extract_collaborators`, or
    `claw-forge boundaries audit --json` for the target path. Note the recommended
    pattern and the score breakdown.
 
-2. **Select the pattern.**
+2. **Select the pattern** from the audit report entry:
    - `registry` — a single dispatcher maps string keys to handler functions/classes;
      new entries are added by registration, not `elif` chains.
    - `split` — a file or module that has grown beyond a single responsibility is
@@ -29,18 +31,17 @@ canonical refactor patterns: `registry`, `split`, `extract_collaborators`, or
    - `route_table` — URL/event routing expressed as a data table rather than nested
      conditionals.
 
-3. **Apply the refactor** to the hotspot path. Use Read, Write, Edit, and Grep.
-   Do not change public API surfaces unless the task record's `touches_files` permits it.
+3. **Dispatch the `boundaries-refactor` subagent:**
 
-4. **Run tests.** Execute the project's test command. The refactor must leave tests
-   green; roll back and try a narrower approach if they fail.
-
-5. **Commit the refactor:**
-   ```sh
-   git commit -m "refactor(<path>): apply <pattern> pattern"
+   ```
+   Task(
+     subagent_type="boundaries-refactor",
+     prompt=<hotspot path, recommended pattern, score breakdown, and touches_files constraints>
+   )
    ```
 
-6. **Emit the per-hotspot refactor verdict:**
+4. **Collect the subagent result.** The `boundaries-refactor` subagent returns:
+
    ```json
    {
      "path": "<hotspot-path>",
@@ -51,8 +52,11 @@ canonical refactor patterns: `registry`, `split`, `extract_collaborators`, or
    }
    ```
 
+5. **Display the per-hotspot refactor verdict** including `path`, `pattern`, `status`,
+   and whether tests passed.
+
 ## Auto Mode
 
-When `/claw-forge boundaries-apply --auto` is used, this skill repeats steps 1–6 for
+When `/claw-forge boundaries-apply --auto` is used, this skill repeats steps 1–5 for
 each hotspot in the audit report, in descending score order. It stops on the first
 `failed` verdict and reports remaining hotspots as `skipped`.
