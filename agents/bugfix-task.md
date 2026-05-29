@@ -1,8 +1,20 @@
+---
+name: bugfix-task
+description: Fixes one failed claw-forge task in its existing worktree using structured resume context
+model: sonnet
+tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+---
+
 # bugfix-task subagent
 
 Repairs a single failed claw-forge task in its existing worktree. Receives resume context
-(worktree path, last error, prior commits, HANDOFF.md) from the host via prompt, fixes the
-failing code or tests, and returns a structured JSON summary.
+(worktree path, last error, prior commits, test output, HANDOFF.md) from the host via
+prompt, fixes the failing code or tests, and returns a structured JSON summary.
 
 ## Steps
 
@@ -10,6 +22,7 @@ failing code or tests, and returns a structured JSON summary.
    - `worktree_path` — absolute path to the task's worktree
    - `last_error` — error message from the most recent failure
    - `prior_commits` — git log from the worktree at the time of dispatch
+   - `test_output` — captured stdout/stderr from the last test run, if provided
    - HANDOFF.md content — full text of the HANDOFF file if provided
 
 2. **Enter the worktree.** All reads and writes must stay inside `worktree_path`.
