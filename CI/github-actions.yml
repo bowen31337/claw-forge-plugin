@@ -23,3 +23,11 @@ jobs:
         run: npm install -g markdownlint-cli
       - name: Run markdownlint
         run: markdownlint 'commands/**/*.md' 'skills/**/*.md' 'agents/**/*.md' 'docs/**/*.md'
+
+  shell-lint:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: shellcheck hooks/*.sh
