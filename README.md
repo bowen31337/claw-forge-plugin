@@ -19,6 +19,72 @@ gives apps that use `claude-agent-sdk` or `claude -p` a limited credit allowance
 agent invocation. The plugin form moves that execution inside your CC session, where it
 bills the normal way.
 
+## Install
+
+Install in this order:
+
+1. Install the sidecar (Python package, provides state service, Kanban UI, spec tooling,
+   git helpers):
+
+   ```sh
+   pip install -U claw-forge
+   ```
+
+   Requires `claw-forge >= 0.6.0`. The `SessionStart` hook prints an upgrade hint if an
+   older version is detected.
+
+2. Install the plugin inside Claude Code:
+
+   ```
+   /plugin install claw-forge
+   ```
+
+That's it. Open any claw-forge project and the sidecar starts automatically on session
+open.
+
+## Hello world
+
+```sh
+cd my-project          # a git repo with a description of what you want to build
+```
+
+1. **Author a spec.** Describe the project to Claude and generate the feature list:
+
+   ```
+   /claw-forge spec-create
+   ```
+
+   The host session writes `app_spec.xml` when done.
+
+2. **Seed the plan.** Parse the spec and build the dependency graph:
+
+   ```
+   /claw-forge plan
+   ```
+
+3. **Run.** Dispatch all ready features in parallel — billed against your subscription
+   pool, not the metered SDK allowance:
+
+   ```
+   /claw-forge run
+   ```
+
+   Open the Kanban UI in another tab to watch progress:
+
+   ```
+   /claw-forge ui
+   ```
+
+4. **Merge.** When the run finishes, squash-merge every completed feature branch into
+   `main`:
+
+   ```
+   /claw-forge merge
+   ```
+
+For brownfield projects start with `/claw-forge spec-import` to snapshot the existing
+codebase first.
+
 ## How it works (in one paragraph)
 
 You install two things: `pip install claw-forge` (the Python sidecar — state service,
@@ -38,6 +104,9 @@ calls anywhere — the host CC session is the only thing that ever talks to Clau
   component map, dispatch loop replacement, subagent workflow, sidecar interface,
   hooks, sandboxing changes, build/test/CI strategy, migration path, sidecar slimming
   needed in claw-forge v0.6.0
+- **[Sidecar contract](docs/sidecar-contract.md)** — every `claw-forge` CLI subcommand
+  the plugin calls, its flags, and its `--json` response envelope; treat this as the
+  stability boundary between the plugin and the [claw-forge sidecar](https://github.com/<org>/claw-forge)
 
 ## Building this plugin
 
