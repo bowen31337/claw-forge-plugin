@@ -41,3 +41,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run shellcheck
         run: shellcheck hooks/*.sh
+
+  no-sdk-invariant:
+    name: No-SDK invariant (PRD §9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grep for SDK patterns
+        run: |
+          hits=$(grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' --exclude-dir=docs . || true)
+          if [ -n "$hits" ]; then
+            echo "ERROR: SDK pattern found in plugin tree (PRD §9 hard invariant violated):"
+            echo "$hits"
+            exit 1
+          fi
