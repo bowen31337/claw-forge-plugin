@@ -1,0 +1,20 @@
+# Fixture: claw-forge-feature-implementation
+# Asserts structural requirements for skills/claw-forge-feature-implementation/SKILL.md
+
+skill_file: skills/claw-forge-feature-implementation/SKILL.md
+
+# Required YAML frontmatter fields
+require_frontmatter: name
+require_frontmatter: description
+require_frontmatter: triggers
+
+# Required markdown sections (exact H2 heading text)
+require_section: ## Trigger
+require_section: ## Steps
+require_section: ## Output Contract
+
+# Required trigger keywords (must appear verbatim anywhere in the file)
+require_keyword: coding-feature
+require_keyword: worktree
+require_keyword: tests_passed
+require_keyword: HANDOFF.md

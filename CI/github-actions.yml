@@ -31,27 +31,63 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install markdownlint-cli
         run: npm install -g markdownlint-cli
-      - name: Run markdownlint
-        run: markdownlint 'commands/**/*.md' 'skills/**/*.md' 'agents/**/*.md' 'docs/**/*.md'
+      - name: Lint markdown files
+        run: |
+          markdownlint \
+            'commands/**/*.md' \
+            'skills/**/*.md' \
+            'agents/**/*.md' \
+            'docs/**/*.md'
 
   shell-lint:
     name: Shell lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run shellcheck
-        run: shellcheck hooks/*.sh
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Run shellcheck on hooks
+        run: |
+          find hooks -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
 
   no-sdk-invariant:
-    name: No-SDK invariant (PRD §9)
+    name: No-SDK invariant
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Grep for SDK patterns
+      - name: Assert zero SDK references in plugin tree
         run: |
-          hits=$(grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' --exclude-dir=docs . || true)
-          if [ -n "$hits" ]; then
-            echo "ERROR: SDK pattern found in plugin tree (PRD §9 hard invariant violated):"
-            echo "$hits"
+          if grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' \
+               --include='*.md' \
+               --include='*.sh' \
+               --include='*.json' \
+               --include='*.yaml' \
+               --include='*.yml' \
+               --exclude-dir=docs \
+               .; then
+            echo "ERROR: SDK reference found in plugin tree (see above). Hard fail." >&2
             exit 1
           fi
+          echo "OK: zero SDK references found."
+
+  cli-contract-smoke:
+    name: CLI contract smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      MIN_SIDECAR: "0.6.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install sidecar at MIN declared version
+        run: pip install "claw-forge==${MIN_SIDECAR}"
+
+      - name: Run CLI contract smoke test
+        run: sh tests/smoke/run-reference-spec.sh --contract-only
+        # --contract-only exercises CLI commands without dispatching any LLM agents.
+        # Full end-to-end (LLM dispatch) is intentionally excluded from CI.
