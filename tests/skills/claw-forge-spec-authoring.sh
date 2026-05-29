@@ -16,5 +16,6 @@ assert_section              "$SKILL" "## Steps"
 assert_keyword              "$SKILL" "app_spec.xml"
 assert_keyword              "$SKILL" "shape"
 assert_keyword              "$SKILL" "spec-create"
+assert_keyword              "$SKILL" "spec-fix"
 
 check_result "claw-forge-spec-authoring"
