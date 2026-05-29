@@ -1,0 +1,5 @@
+{
+  "stack": "None \u2014 the plugin has no UI. The Kanban UI ships with the sidecar at localhost:8421.",
+  "test_baseline": "2 features completed",
+  "conventions": "see project config"
+}
