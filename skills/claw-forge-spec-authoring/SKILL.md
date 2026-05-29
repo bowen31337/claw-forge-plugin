@@ -1,9 +1,10 @@
 ---
 name: claw-forge-spec-authoring
-description: Draft and edit app_spec.xml with shape annotations for spec-create, spec-fix, and spec-expand workflows
+description: Draft and edit app_spec.xml with shape annotations for spec-create, spec-import, spec-fix, and spec-expand workflows
 triggers:
   - claw-forge-spec-authoring
   - /claw-forge spec-create
+  - /claw-forge spec-import
   - /claw-forge spec-fix
   - /claw-forge spec-expand
 ---
@@ -16,6 +17,86 @@ the claw-forge sidecar can parse, validate, and schedule. It is loaded by
 `/claw-forge spec-fix` (repair validator errors), and `/claw-forge spec-expand`
 (expand a single feature into sub-features). The skill writes the spec file to
 disk and displays the output path on completion.
+
+## Brownfield mode (spec-import)
+
+When loaded by `/claw-forge spec-import` the skill runs a different flow that produces
+**two** output files instead of one:
+
+- `brownfield_manifest.json` — catalog of the existing codebase that the sidecar uses
+  to avoid touching already-implemented paths.
+- `additions_spec.xml` — an `app_spec.xml`-shaped document containing only the **new**
+  features to layer on top of the existing code.
+
+### Brownfield Phase 0 — Scan and write manifest
+
+1. Recursively walk the project directory (skip `.git`, `node_modules`, `__pycache__`,
+   `.venv`, `dist`, `build`, and similar generated directories).
+2. Detect the tech stack from lock files, manifests, and config files
+   (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, etc.).
+3. Group source files into logical modules (directories that function as a cohesive
+   unit: a service, library, UI component tree, test suite, config layer, etc.).
+4. Identify existing entry points (main files, top-level routers, CLI entrypoints).
+5. Write `brownfield_manifest.json` using this schema:
+
+   ```json
+   {
+     "schema_version": "1.0",
+     "scanned_at": "<ISO-8601 timestamp>",
+     "project": {
+       "name": "<inferred from manifest file>",
+       "stack": ["<language>", "<framework>"],
+       "root": "<repo-relative root, usually .>"
+     },
+     "modules": [
+       {
+         "name": "<module name>",
+         "path": "<repo-relative path>",
+         "type": "service|library|ui|config|test|other",
+         "description": "<one-line description>"
+       }
+     ],
+     "existing_features": [
+       {
+         "name": "<feature name>",
+         "paths": ["<repo-relative paths>"],
+         "description": "<one-line description of what already exists>"
+       }
+     ],
+     "entry_points": ["<repo-relative paths>"],
+     "preserved_paths": ["<repo-relative paths or globs the sidecar must not overwrite>"]
+   }
+   ```
+
+6. Confirm the manifest path (`output_manifest`, default `./brownfield_manifest.json`)
+   with the user before writing.
+
+### Brownfield Phases 1–3 — same as greenfield, but scoped to additions
+
+Run Phases 1–3 from the standard flow below, with these differences:
+
+- Phase 1: derive context by scanning the existing code rather than asking the user to
+  describe it from scratch; ask only for the **new** capabilities to add.
+- Phase 2: set `mode="brownfield"` on `<project_specification>` and omit features that
+  already exist in `brownfield_manifest.json → existing_features`.
+- Phase 3.25 / 3.5: cross-check `touches_files` against
+  `brownfield_manifest.json → preserved_paths`; flag any `plugin` feature that would
+  write into a preserved path and downgrade it to `shape="core"`.
+
+### Brownfield Phase 4 — Write additions_spec.xml and display both paths
+
+1. Write the final spec to `output_spec` (default `./additions_spec.xml`).
+2. Run `claw-forge spec validate --json` on the spec and fix any errors.
+3. Display both output paths on success:
+
+   ```
+   brownfield_manifest.json written → ./brownfield_manifest.json
+   additions_spec.xml written → ./additions_spec.xml  (N features: M core, K plugin)
+   ```
+
+---
+
+## Greenfield / fix mode (spec-create, spec-fix)
 
 ## Steps
 
