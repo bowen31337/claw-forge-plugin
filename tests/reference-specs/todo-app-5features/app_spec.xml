@@ -1,251 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <!--
-  claw-forge Reference Spec — 5-Feature TODO App
-  ================================================
-  Canonical fixture used as the manual pre-release completion-rate gate.
+  Reference spec: todo-app-5features
+  ====================================
+  Minimal 5-feature toy spec used by tests/smoke/run-reference-spec.sh.
 
-  Gate: a manual end-to-end run of this spec via the claw-forge plugin
-  must display ≥ 85% feature completion (≥ 5 of 5 features green, or
-  4 of 5 in a marginal pass) before tagging a plugin release.
+  Purpose: validate the plan → run → merge pipeline end-to-end without
+  requiring a production-quality app. Deliberately trivial — correctness
+  of the claw-forge pipeline matters more than the resulting code.
 
-  Design constraints:
-    - Exactly 5 features — one per dispatch slot — to keep the run
-      under the 5-minute wall-clock target from PRD §6.
-    - All features are shape="plugin" to exercise the parallel dispatch
-      loop end-to-end without single-flight serialisation.
-    - Stack is intentionally minimal (FastAPI + SQLite, no migrations
-      framework, no auth) to minimise environmental failure modes and
-      keep the completion rate consistently above the 85 % threshold.
-    - The test does NOT require a real browser; the acceptance criteria
-      are verified against the API responses and a minimal React page
-      served by Vite.
-
-  Do NOT add features to this file without bumping the gate threshold
-  in docs/PRD.md §6 and updating the smoke test in
-  tests/smoke/run-reference-spec.sh.
+  Stack: Python 3.11+ standard library, argparse CLI, tasks.json storage.
+  No third-party dependencies — keeps agent implementation fast and
+  eliminates package-install variability from the smoke test.
 -->
 <project_specification mode="greenfield">
   <project_name>todo-app</project_name>
 
   <overview>
-    A minimal 5-feature TODO application serving as the claw-forge plugin
-    reference spec for pre-release validation. The app exposes a REST API
-    backed by SQLite and a single-page React front end. Its sole purpose
-    is to verify that the plugin's dispatch loop can implement five
-    independent, parallel-safe features at ≥ 85 % completion rate within
-    the 5-minute wall-clock budget defined in PRD §6.
+    A minimal command-line TODO list in Python. Tasks are persisted in a local
+    tasks.json file. Five features cover full CRUD: scaffold, add, list, mark
+    done, and delete. This spec is the reference smoke-test fixture for the
+    claw-forge-plugin; it is intentionally tiny so the full pipeline can
+    complete within the 5-minute success-metric window.
   </overview>
 
   <target_audience>
-    claw-forge plugin developers and release engineers running the manual
-    pre-release smoke gate. The app is never deployed to end users.
+    claw-forge-plugin developers running the manual smoke test. The generated
+    app is a validation target, not a product.
   </target_audience>
 
   <technology_stack>
     <backend>
-      <framework>Python 3.12 with FastAPI</framework>
-      <database_driver>aiosqlite (direct SQL, no ORM)</database_driver>
-      <validation>Pydantic v2</validation>
-      <server>Uvicorn (uvicorn src.main:app --reload)</server>
+      <framework>Python 3.11+ standard library only</framework>
+      <entrypoint>todo.py (CLI via argparse subcommands)</entrypoint>
+      <storage>tasks.json flat file in the project root</storage>
     </backend>
-    <frontend>
-      <framework>React 18 with Vite</framework>
-      <language>TypeScript</language>
-      <styling>Tailwind CSS</styling>
-      <http_client>fetch (built-in)</http_client>
-    </frontend>
-    <database>
-      <primary>SQLite — file path: todo.db at project root</primary>
-      <schema_init>CREATE TABLE executed on startup if the table does not exist (no migration framework needed)</schema_init>
-    </database>
     <communication>
-      <api_style>REST</api_style>
-      <base_path>/api</base_path>
-      <response_format>JSON (bare objects and arrays — no envelope wrapper)</response_format>
-      <cors>Backend allows http://localhost:5173 (Vite dev server)</cors>
+      <api_style>CLI — subcommands: add, list, done, delete</api_style>
     </communication>
   </technology_stack>
 
   <prerequisites>
-    - Python 3.12+ with uv installed (uv run uvicorn starts the backend)
-    - Node.js 18+ for the Vite frontend
-    - No external services required; SQLite is file-based and auto-created
-    - No environment variables required for local development
+    - Python 3.11+
+    - No third-party packages required
   </prerequisites>
 
   <core_features>
-    <!--
-      All 5 features are shape="plugin" with plugin="todos".
-      They may be dispatched in parallel by the claw-forge dispatch loop.
-      Each feature owns only files under src/plugins/todos/ on the backend
-      and src/features/todos/ on the frontend.
 
-      Acceptance shorthand used below:
-        API → HTTP request/response contract (verified by curl / pytest)
-        UI  → observable behaviour in the React page (verified manually)
-    -->
-    <category name="TODO CRUD">
-
-      <feature index="1" shape="plugin" plugin="todos">
-        <description>User can create a TODO item by posting a non-blank title; API POST /api/todos returns 201 with JSON body { "id": &lt;integer&gt;, "title": &lt;string&gt;, "completed": false, "created_at": &lt;ISO-8601 string&gt; }; API returns 422 when title is missing or blank; UI input field and "Add" button submit the request and prepend the new item to the list without a page reload</description>
+    <category name="Project Scaffold">
+      <!--
+        shape="core": cross-cutting — creates the shared entry point and README
+        used by all plugin features. Dispatched single-flight before plugins.
+      -->
+      <feature index="1" shape="core"
+               touches_files="todo.py,tasks.json,README.md">
+        <description>Project contains todo.py as the CLI entry point with an argparse parser that registers add/list/done/delete subcommands; tasks.json is initialised to [] on first write (not committed); README.md documents each subcommand with a one-line usage example; running `python todo.py --help` exits 0 and lists all four subcommands</description>
       </feature>
-
-      <feature index="2" shape="plugin" plugin="todos">
-        <description>User can retrieve all TODO items; API GET /api/todos returns 200 with a JSON array of { id, title, completed, created_at } objects ordered by created_at descending (newest first); empty list returns 200 with []; UI renders the list on mount and after every mutating action</description>
-      </feature>
-
-      <feature index="3" shape="plugin" plugin="todos">
-        <description>User can toggle the completed state of a TODO item; API PATCH /api/todos/{id}/toggle returns 200 with the updated item ({ id, title, completed, created_at }) or 404 when the id does not exist; UI checkbox reflects the current completed state and triggers the toggle on click, applying a line-through style to completed titles</description>
-      </feature>
-
-      <feature index="4" shape="plugin" plugin="todos">
-        <description>User can edit a TODO item's title in place; API PUT /api/todos/{id} accepts { "title": &lt;string&gt; } and returns 200 with the updated item, 422 when title is blank, or 404 when the id does not exist; UI shows an inline edit field when the user double-clicks a title, saves on Enter or blur, and cancels on Escape</description>
-      </feature>
-
-      <feature index="5" shape="plugin" plugin="todos">
-        <description>User can delete a TODO item; API DELETE /api/todos/{id} returns 204 on success or 404 when the id does not exist; UI shows a delete button (×) beside each item that removes the item from the list immediately on success without a full list refresh</description>
-      </feature>
-
     </category>
+
+    <category name="Task Management">
+      <!--
+        shape="plugin": each subcommand is vertically isolated — it owns its
+        argument handler and delegates storage I/O to the helpers established
+        in the scaffold feature.
+      -->
+      <feature index="2" shape="plugin" plugin="add">
+        <description>User can run `python todo.py add "buy milk"` and the task is appended to tasks.json with an auto-incremented integer id, the provided title, and done=false; the command prints "Added task #N: &lt;title&gt;" to stdout; running add when tasks.json is absent creates the file automatically</description>
+      </feature>
+
+      <feature index="3" shape="plugin" plugin="list">
+        <description>User can run `python todo.py list` and sees a formatted table where each row shows the task id, a status indicator ([ ] for pending, [x] for done), and the title; when tasks.json is empty or absent the command prints "No tasks yet." and exits 0</description>
+      </feature>
+
+      <feature index="4" shape="plugin" plugin="done">
+        <description>User can run `python todo.py done &lt;id&gt;` to set done=true on the task with the given integer id and persist the change to tasks.json; the command prints "Marked #N as done"; if the id does not exist the command prints "Task #N not found" to stderr and exits 1</description>
+      </feature>
+
+      <feature index="5" shape="plugin" plugin="delete">
+        <description>User can run `python todo.py delete &lt;id&gt;` to remove the task with the given integer id from tasks.json; the command prints "Deleted task #N"; if the id does not exist the command prints "Task #N not found" to stderr and exits 1</description>
+      </feature>
+    </category>
+
   </core_features>
-
-  <database_schema>
-    <tables>
-      <table name="todos">
-        <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
-        <column>title TEXT NOT NULL</column>
-        <column>completed INTEGER NOT NULL DEFAULT 0</column>
-        <column>created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))</column>
-        <note>completed stores 0 (false) or 1 (true); the API layer converts to JSON boolean</note>
-        <note>Table is created by the backend on startup with CREATE TABLE IF NOT EXISTS — no migration tool required</note>
-      </table>
-    </tables>
-  </database_schema>
-
-  <api_endpoints_summary>
-    <domain name="Todos">
-      POST   /api/todos              - Create a new TODO item (body: { "title": string })
-      GET    /api/todos              - List all TODO items ordered by created_at DESC
-      PATCH  /api/todos/{id}/toggle  - Toggle the completed flag of a TODO item
-      PUT    /api/todos/{id}         - Update the title of a TODO item (body: { "title": string })
-      DELETE /api/todos/{id}         - Delete a TODO item
-    </domain>
-  </api_endpoints_summary>
-
-  <ui_layout>
-    <structure>
-      Single page (/) served by Vite at http://localhost:5173
-
-      Layout (top to bottom):
-        - Heading: "My TODOs"
-        - Add-item row: text input (placeholder "What needs doing?") + "Add" button
-        - TODO list: each row contains
-            • Checkbox (completed toggle)
-            • Title text (double-click to edit inline)
-            • Delete button (×)
-          Completed items have a line-through style on the title text
-        - Empty-state message: "No todos yet — add one above!" when the list is empty
-
-      No routing, no authentication, no pagination needed.
-    </structure>
-  </ui_layout>
-
-  <design_system>
-    <color_palette>
-      Background:       #ffffff
-      Surface:          #f9fafb
-      Border:           #e5e7eb
-      Text primary:     #111827
-      Text secondary:   #6b7280
-      Accent:           #f97316 (forge orange — Add button, focus rings)
-      Danger:           #ef4444 (delete button hover)
-      Completed title:  #9ca3af with line-through
-    </color_palette>
-    <typography>
-      Font family: Inter, system-ui, sans-serif
-      Heading:     text-2xl font-bold
-      Body:        text-sm font-normal
-    </typography>
-    <animations>
-      Item removal: fade-out 150 ms
-      Inline edit:  no transition (instant swap)
-    </animations>
-  </design_system>
-
-  <key_interactions>
-    <interaction number="1" name="Add and see a TODO">
-      1. User types a title in the input field and clicks "Add" (or presses Enter)
-      2. POST /api/todos fires with { "title": &lt;typed text&gt; }
-      3. New item appears at the top of the list
-      4. Input field is cleared and focused
-    </interaction>
-    <interaction number="2" name="Complete and delete a TODO">
-      1. User checks the checkbox on an item
-      2. PATCH /api/todos/{id}/toggle fires; title gains line-through style
-      3. User clicks the × button
-      4. DELETE /api/todos/{id} fires; item fades out and is removed from the list
-    </interaction>
-    <interaction number="3" name="Edit a TODO title">
-      1. User double-clicks the title text
-      2. An input field appears pre-filled with the current title
-      3. User edits and presses Enter
-      4. PUT /api/todos/{id} fires with { "title": &lt;new text&gt; }
-      5. Title text updates in place; edit field disappears
-      6. If the user presses Escape, the edit is cancelled without a network call
-    </interaction>
-  </key_interactions>
-
-  <implementation_steps>
-    <phase name="Phase 1: Backend scaffold">
-      Create pyproject.toml with fastapi, uvicorn[standard], aiosqlite, pydantic dependencies managed by uv
-      Create src/main.py: FastAPI app with CORS middleware allowing http://localhost:5173
-      Create src/database.py: async SQLite connection helper and CREATE TABLE IF NOT EXISTS on startup
-      Implement all 5 REST endpoints in src/plugins/todos/router.py and register under /api
-      Return 404 HTTPException with { "detail": "Todo not found" } for unknown ids
-      Return 422 for blank or missing title (Pydantic validation handles this automatically)
-    </phase>
-    <phase name="Phase 2: Frontend scaffold">
-      Scaffold React + Vite + TypeScript project in frontend/ with Tailwind CSS
-      Create src/features/todos/api.ts: typed fetch helpers for all 5 API operations
-      Create src/features/todos/TodoList.tsx: list component wired to GET /api/todos
-      Create src/features/todos/TodoItem.tsx: row with checkbox, inline-edit, and delete button
-      Create src/features/todos/AddTodo.tsx: input + button wired to POST /api/todos
-      Wire everything in src/App.tsx; run on http://localhost:5173 proxying /api to http://localhost:8000
-    </phase>
-    <phase name="Phase 3: Acceptance verification">
-      Verify all 5 API contracts with curl commands (documented in README)
-      Verify UI interactions per key_interactions section
-      Confirm empty-state, 404, and 422 error paths
-    </phase>
-  </implementation_steps>
 
   <success_criteria>
     <functionality>
-      POST /api/todos returns 201 with correct body shape
-      GET /api/todos returns 200 with array ordered newest-first
-      PATCH /api/todos/{id}/toggle returns 200 with toggled completed field
-      PUT /api/todos/{id} returns 200 with updated title
-      DELETE /api/todos/{id} returns 204
-      All endpoints return 404 for unknown id
-      POST and PUT return 422 for blank title
+      All five features pass their described behaviour checks.
+      The acceptance sequence below produces the expected output:
+        python todo.py add "task one"    # → Added task #1: task one
+        python todo.py add "task two"    # → Added task #2: task two
+        python todo.py add "task three"  # → Added task #3: task three
+        python todo.py list              # → 3 rows, all [ ]
+        python todo.py done 2            # → Marked #2 as done
+        python todo.py delete 1          # → Deleted task #1
+        python todo.py list              # → 2 rows: #2 [x], #3 [ ]
+      Error paths: `done 99` and `delete 99` print "Task #99 not found" and exit 1.
     </functionality>
-    <ux>
-      New item appears at top of list after Add
-      Completed items show line-through style
-      Inline edit saves on Enter, cancels on Escape
-      Deleted items are removed from the list without full reload
-      Empty-state message shows when list is empty
-    </ux>
-    <technical_quality>
-      Backend starts with: uv run uvicorn src.main:app --reload
-      Frontend starts with: npm run dev inside frontend/
-      No TypeScript type errors (tsc --noEmit passes)
-      No Python type errors (pyright or mypy passes)
-      SQLite file is gitignored
-    </technical_quality>
-    <completion_gate>
-      ≥ 4 of 5 features fully implemented and verifiable (85 % threshold)
-      All 5 features implemented and verifiable is the target (100 %)
-    </completion_gate>
   </success_criteria>
 
 </project_specification>
