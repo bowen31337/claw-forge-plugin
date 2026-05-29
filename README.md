@@ -5,8 +5,11 @@ autonomous coding agent harness inside your interactive Claude Code session — 
 agent invocation bills against your Claude Pro/Max subscription pool instead of the
 metered Claude Agent SDK allowance.
 
-**Status:** Pre-release. Documentation and spec only. Implementation tracked in the
-plugin's own claw-forge run.
+**Status:** Pre-implementation (v0.1.0 draft). The PRD and architecture are frozen, the
+[`app_spec.txt`](./app_spec.txt) is validated (49 features across 9 categories), and the
+directory layout is scaffolded — every file under `commands/`, `skills/`, `agents/`,
+`hooks/`, `CI/`, and `tests/` is an empty stub waiting on its corresponding feature.
+The plugin's own `claw-forge run` will fill them in.
 
 ## Why
 

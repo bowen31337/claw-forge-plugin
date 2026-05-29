@@ -1,0 +1,389 @@
+<!--
+  claw-forge-plugin — Project Specification
+  ==========================================
+  Generated from docs/PRD.md and docs/ARCHITECTURE.md.
+
+  This is the build spec for the Claude Code plugin that pairs with the
+  claw-forge sidecar (Python package). The plugin executes inside the
+  user's interactive Claude Code session so agent invocations bill against
+  their Pro/Max subscription pool instead of the metered Agent SDK
+  allowance.
+
+  Hard invariant: no `claude_agent_sdk` imports anywhere in this tree.
+  All agent work happens via Task subagents, slash commands, and skills
+  loaded into the host session.
+
+  Note: <database_schema> and <api_endpoints_summary> are intentionally
+  omitted — the plugin owns no schema and defines no API. State persists
+  in the sidecar's existing .claw-forge/state.db (accessed only through
+  the sidecar CLI) and the sidecar CLI contract surface is documented in
+  docs/PRD.md §8 and <claw-forge>/docs/sidecar-contract.md.
+-->
+<project_specification mode="greenfield">
+  <project_name>claw-forge-plugin</project_name>
+
+  <overview>
+    A Claude Code plugin that surfaces the claw-forge spec → DAG → parallel
+    autonomous agents workflow as slash commands, skills, and Task-tool
+    subagents — billed against the user's Pro/Max subscription pool. It
+    replaces the Agent-SDK-based dispatch path in sidecar v0.5.x while
+    keeping the sidecar's state service, Kanban UI, spec validator, and
+    git/worktree machinery untouched. Targets plugin v0.1.0, paired with
+    sidecar claw-forge v0.6.0.
+  </overview>
+
+  <target_audience>
+    Existing claw-forge users on Claude Pro or Max plans who want to keep
+    using claw-forge without metered API spend on top of their
+    subscription. Also greenfield/brownfield authors who already work in
+    Claude Code daily and want spec-driven autonomous agents inside their
+    normal workflow.
+  </target_audience>
+
+  <technology_stack>
+    <frontend>
+      <framework>None — the plugin has no UI. The Kanban UI ships with the sidecar at localhost:8421.</framework>
+    </frontend>
+    <backend>
+      <framework>Markdown — each slash command, skill, and subagent is a markdown file loaded by the host Claude Code session.</framework>
+      <shell>POSIX sh for hooks (SessionStart bootstrap)</shell>
+      <manifest>Claude Code plugin manifest (.claude-plugin/plugin.json)</manifest>
+    </backend>
+    <database>
+      <primary>None directly. State persistence is owned by the sidecar's existing SQLite store at .claw-forge/state.db, accessed exclusively through the sidecar CLI — never read or written by the plugin.</primary>
+    </database>
+    <communication>
+      <api_style>Bash + sidecar CLI (every JSON-emitting subcommand listed in PRD §8 is the contract surface).</api_style>
+      <response_format>JSON envelopes emitted by sidecar CLI subcommands with --json flag, documented in &lt;claw-forge&gt;/docs/sidecar-contract.md.</response_format>
+    </communication>
+    <infrastructure>
+      <distribution>Plugin marketplace install via /plugin install claw-forge (or direct repo URL for v0.1)</distribution>
+      <ci>GitHub Actions: markdownlint + shellcheck + JSON-schema validation + no-SDK invariant grep + cross-repo CLI smoke test</ci>
+    </infrastructure>
+  </technology_stack>
+
+  <prerequisites>
+    - Claude Code CLI installed and authenticated to a Pro or Max subscription
+    - Sidecar claw-forge Python package on $PATH at version >= 0.6.0 (pip install -U claw-forge)
+    - Git 2.30+ for worktree management (used by sidecar git helpers)
+    - POSIX shell, jq, awk available for the SessionStart hook
+    - For CI: Node.js 18+ (markdownlint), shellcheck, jq, GitHub Actions runner
+  </prerequisites>
+
+  <core_features>
+
+    <category name="Plugin Manifest &amp; Repository Scaffolding">
+      <feature index="1" shape="core"
+               touches_files=".claude-plugin/plugin.json">
+        <description>System plugin manifest at .claude-plugin/plugin.json declares name=claw-forge, version=0.1.0, license=Apache-2.0, plus author, homepage, repository, and keywords array (autonomous, agent, spec-driven, orchestration); CI JSON-schema check displays 0 validation errors against the official .claude-plugin/plugin.json schema</description>
+      </feature>
+      <feature index="2" shape="core"
+               touches_files="LICENSE">
+        <description>System ships LICENSE at the repository root containing the full Apache-2.0 text (file exists and displays the strings "Apache License" and "Version 2.0")</description>
+      </feature>
+      <feature index="3" shape="core"
+               touches_files=".gitignore">
+        <description>System .gitignore at the repository root excludes .DS_Store, node_modules/, and .claw-forge/ runtime directories so the plugin tree stays clean for marketplace install (git status displays a clean working tree when those paths are present)</description>
+      </feature>
+      <feature index="4" shape="core"
+               touches_files="README.md">
+        <description>User can read README.md to learn the install order (pip install claw-forge first, then /plugin install claw-forge), the credit-pool motivation (subscription pool vs SDK allowance), and the hello-world walkthrough; README displays links to docs/sidecar-contract.md and the sidecar repo</description>
+      </feature>
+      <feature index="5" shape="core"
+               touches_files="docs/migrating-to-plugin.md">
+        <description>User can read docs/migrating-to-plugin.md to migrate from claw-forge v0.5.x to v0.6.0 plus the plugin; guide displays the step-by-step upgrade path and the /claw-forge run habit change, and notes the providers: block plus agent.isolation: container settings are now ignored</description>
+      </feature>
+    </category>
+
+    <category name="SessionStart Hook &amp; Sidecar Bootstrap">
+      <feature index="6" shape="core"
+               touches_files="hooks/hooks.json">
+        <description>System hooks/hooks.json registers a SessionStart hook (matcher startup|clear|compact) that invokes "${CLAUDE_PLUGIN_ROOT}/hooks/ensure-sidecar.sh" synchronously with async=false (Claude Code loads the hook config on session start and displays no parse errors)</description>
+      </feature>
+      <feature index="7" shape="core"
+               touches_files="hooks/ensure-sidecar.sh">
+        <description>System hooks/ensure-sidecar.sh bootstraps the sidecar on SessionStart and exits 0 in every code path; script silently exits 0 in non-claw-forge directories, displays a one-line `pip install claw-forge` hint when the CLI is missing, displays an upgrade hint when sidecar &lt; MIN_SIDECAR=0.6.0, starts the state service via `claw-forge state start --detach` when not running, and displays a banner showing state port, UI port, and session id once ready — never aborts the host session</description>
+      </feature>
+      <feature index="8" shape="core"
+               touches_files="hooks/version-gte.sh">
+        <description>System hooks/version-gte.sh is a POSIX semver comparator helper used by ensure-sidecar.sh; script exits with code 0 when arg1 &gt;= arg2 or code 1 otherwise, and standalone CI test cases display "all pass" with exit code 0 across every comparison scenario</description>
+      </feature>
+    </category>
+
+    <category name="Slash Commands — Spec Authoring">
+      <feature index="9" shape="core"
+               touches_files="commands/spec-create.md">
+        <description>User can run /claw-forge spec-create to interactively generate an app_spec.xml from a description; command verifies cwd, loads the claw-forge-spec-authoring skill, and writes the resulting spec to disk (host session displays the output file path on success)</description>
+      </feature>
+      <feature index="10" shape="core"
+               touches_files="commands/spec-import.md">
+        <description>User can run /claw-forge spec-import to import an existing project structure into brownfield_manifest.json plus additions_spec.xml via the spec-authoring skill (host session displays the two output paths on success)</description>
+      </feature>
+      <feature index="11" shape="core"
+               touches_files="commands/spec-validate.md">
+        <description>User can run /claw-forge spec-validate to run all 4 validator layers via `claw-forge spec validate --json`; host session displays formatted findings with exit code 0 on PASS or exit code 1 on FAIL</description>
+      </feature>
+      <feature index="12" shape="core"
+               touches_files="commands/spec-fix.md">
+        <description>User can run /claw-forge spec-fix to interactively resolve validator errors; command loads the spec-authoring skill and rewrites only the offending bullets (host session displays a per-pass summary of fixed issues)</description>
+      </feature>
+      <feature index="13" shape="core"
+               touches_files="commands/spec-expand.md">
+        <description>User can run /claw-forge spec-expand &lt;feature-id&gt; to expand a single feature into sub-features via the spec-authoring skill; host session displays the new sub-features before writing the updated spec to disk</description>
+      </feature>
+    </category>
+
+    <category name="Slash Commands — Planning &amp; Execution">
+      <feature index="14" shape="core"
+               touches_files="commands/plan.md">
+        <description>User can run /claw-forge plan to parse the spec and seed the DAG via `claw-forge plan --spec &lt;path&gt; --json`; host session displays the seeded feature count, category breakdown, and any parser warnings (exit code 0 on success)</description>
+      </feature>
+      <feature index="15" shape="core"
+               touches_files="commands/run.md">
+        <description>User can run /claw-forge run to drive the dispatch loop in the host session; command loads the claw-forge-dispatch-loop skill and accepts optional --features &lt;ids&gt; and --max-concurrency &lt;N&gt; flags (host session displays a per-wave dispatch summary and exits when the DAG is empty)</description>
+      </feature>
+      <feature index="16" shape="core"
+               touches_files="commands/resume.md">
+        <description>User can run /claw-forge resume to resume paused tasks via `claw-forge state resume --json` and re-enter the dispatch-loop skill (host session displays the resumed task count)</description>
+      </feature>
+      <feature index="17" shape="core"
+               touches_files="commands/fix.md">
+        <description>User can run /claw-forge fix &lt;task-id&gt; to enter the claw-forge-bugfix-loop skill on a single failed task with resume context (HANDOFF.md, prior commits, last error); host session displays the fix verdict and updated task status on completion</description>
+      </feature>
+      <feature index="18" shape="core"
+               touches_files="commands/merge.md">
+        <description>User can run /claw-forge merge to enumerate ready feature branches via `claw-forge state ready` and squash-merge each via `claw-forge git squash-merge &lt;slug&gt; --json`; host session displays per-branch merge status and routes conflicts into the claw-forge-conflict-recovery skill</description>
+      </feature>
+      <feature index="19" shape="core"
+               touches_files="commands/boundaries-audit.md">
+        <description>User can run /claw-forge boundaries-audit to invoke `claw-forge boundaries audit --json` and display a read-only refactor hotspot report (host session displays the scored path list and exits with code 0)</description>
+      </feature>
+      <feature index="20" shape="core"
+               touches_files="commands/boundaries-apply.md">
+        <description>User can run /claw-forge boundaries-apply &lt;path&gt; or /claw-forge boundaries-apply --auto to refactor one hotspot (positional) or hotspots serially (auto); command loads the claw-forge-boundaries-refactor skill and displays a per-refactor verdict after each apply</description>
+      </feature>
+    </category>
+
+    <category name="Slash Commands — Status &amp; Introspection">
+      <feature index="21" shape="core"
+               touches_files="commands/status.md">
+        <description>User can run /claw-forge status to display a textual session overview via `claw-forge state status --json` (host session displays sidecar state, port, session id, and active task count)</description>
+      </feature>
+      <feature index="22" shape="core"
+               touches_files="commands/session-status.md">
+        <description>User can run /claw-forge session-status to display the live state of the current session, replacing the obsolete /claw-forge pool-status since the provider pool no longer exists (host session displays per-task status with last-event timestamps)</description>
+      </feature>
+      <feature index="23" shape="core"
+               touches_files="commands/ui.md">
+        <description>User can run /claw-forge ui to open the Kanban UI in the default browser by invoking `claw-forge ui` (browser opens to http://localhost:8421 and host session displays the resolved URL)</description>
+      </feature>
+      <feature index="24" shape="core"
+               touches_files="commands/checkpoint.md">
+        <description>User can run /claw-forge checkpoint to manually checkpoint all active worktrees via the sidecar git CLI (host session displays the per-worktree checkpoint SHA on success)</description>
+      </feature>
+      <feature index="25" shape="core"
+               touches_files="commands/stash-list.md">
+        <description>User can run /claw-forge stash-list to display claw-forge stash entries including auto-stashed leak snapshots (host session displays one row per stash with timestamp and task id)</description>
+      </feature>
+      <feature index="26" shape="core"
+               touches_files="commands/stash-drop.md">
+        <description>User can run /claw-forge stash-drop &lt;ref&gt; to drop a stash entry (host session displays confirmation plus the new stash count and exits with code 0 on success)</description>
+      </feature>
+      <feature index="27" shape="core"
+               touches_files="commands/worktrees-list.md">
+        <description>User can run /claw-forge worktrees-list to display active worktrees under .claw-forge/worktrees/ (host session displays one row per worktree with branch name and HEAD SHA)</description>
+      </feature>
+      <feature index="28" shape="core"
+               touches_files="commands/worktrees-prune.md">
+        <description>User can run /claw-forge worktrees-prune to clean up orphaned worktrees via the sidecar cleanup CLI (host session displays the pruned worktree count and exits with code 0)</description>
+      </feature>
+      <feature index="29" shape="core"
+               touches_files="commands/export.md">
+        <description>User can run /claw-forge export &lt;format&gt; to export session and training data via `claw-forge export &lt;format&gt;` (host session displays the output file path on success)</description>
+      </feature>
+    </category>
+
+    <category name="Skills — Dispatch &amp; Workflow Patterns">
+      <feature index="30" shape="core"
+               touches_files="skills/claw-forge-dispatch-loop/SKILL.md">
+        <description>System claw-forge-dispatch-loop skill encodes the wave-by-wave Task-tool dispatch pattern: queries `claw-forge state ready --json --limit ${MAX_BATCH}`, performs file-claim + git create-worktree + git sync-worktree + git leak-snapshot per task (deferring on claim conflict and marking sync conflicts as failed), emits N parallel Task(subagent_type=coding-feature) calls in a single response, then runs leak-check + state patch + git squash-merge per result and loops until the ready batch is empty (skill displays per-wave dispatch summary and exits with code 0 when the DAG is drained)</description>
+      </feature>
+      <feature index="31" shape="core"
+               touches_files="skills/claw-forge-feature-implementation/SKILL.md">
+        <description>System claw-forge-feature-implementation skill describes the per-feature subagent workflow: cd into the assigned worktree, implement the feature, commit checkpoints with a Phase: trailer, run project tests, then display a final structured JSON summary {status, commits, tests_passed, notes} on stdout (skill auto-loads into the coding-feature subagent via trigger-keyword frontmatter)</description>
+      </feature>
+      <feature index="32" shape="core"
+               touches_files="skills/claw-forge-conflict-recovery/SKILL.md">
+        <description>System claw-forge-conflict-recovery skill describes how to inspect conflict markers, resolve them, and re-run tests when sidecar reports sync_conflict or merge_failed (skill replaces the removed git/conflict_advisor.py module and displays a structured resolution verdict per conflict)</description>
+      </feature>
+      <feature index="33" shape="core"
+               touches_files="skills/claw-forge-boundaries-refactor/SKILL.md">
+        <description>System claw-forge-boundaries-refactor skill describes the sequential refactor loop (one hotspot at a time) used by /claw-forge boundaries-apply; covers the registry, split, extract_collaborators, and route_table patterns and routes execution to the boundaries-refactor subagent (skill displays per-hotspot refactor verdict)</description>
+      </feature>
+      <feature index="34" shape="core"
+               touches_files="skills/claw-forge-spec-authoring/SKILL.md">
+        <description>System claw-forge-spec-authoring skill describes how to draft and edit app_spec.xml with shape annotations, including the Phase 3.25 plugin-vs-core classification and Phase 3.5 overlap analysis used by /claw-forge spec-create and /claw-forge spec-fix (skill writes the resulting spec to disk and displays the output path)</description>
+      </feature>
+      <feature index="35" shape="core"
+               touches_files="skills/claw-forge-bugfix-loop/SKILL.md">
+        <description>System claw-forge-bugfix-loop skill describes the interactive bugfix workflow with resume context: fetches the task record via `claw-forge state get --json`, hydrates HANDOFF.md and prior commits, dispatches the bugfix-task subagent into the worktree, and PATCHes task status on completion (skill displays the final fix verdict)</description>
+      </feature>
+    </category>
+
+    <category name="Subagents — Task-Tool Callable Types">
+      <feature index="36" shape="core"
+               touches_files="agents/coding-feature.md">
+        <description>System coding-feature subagent at agents/coding-feature.md declares model=sonnet plus tools=Read,Write,Edit,Bash,Grep with a system prompt containing the workspace-boundary directive, task plus acceptance-criteria template slots, and the structured stdout summary contract {status, commits, tests_passed, notes}; Task tool displays the structured JSON summary when the subagent exits</description>
+      </feature>
+      <feature index="37" shape="core"
+               touches_files="agents/bugfix-task.md">
+        <description>System bugfix-task subagent at agents/bugfix-task.md declares model=sonnet plus tools=Read,Write,Edit,Bash,Grep with a system prompt for fixing a single failed task using structured resume context (prior commits, last error message, test output); Task tool displays the bugfix verdict when the subagent exits</description>
+      </feature>
+      <feature index="38" shape="core"
+               touches_files="agents/feature-reviewer.md">
+        <description>System feature-reviewer subagent at agents/feature-reviewer.md declares model=sonnet plus tools=Read,Bash,Grep with a system prompt for reviewing a feature branch and emitting a structured verdict {verdict: pass|fail, issues, suggestions}; Task tool displays the verdict JSON when the subagent exits</description>
+      </feature>
+      <feature index="39" shape="core"
+               touches_files="agents/merge-conflict-resolver.md">
+        <description>System merge-conflict-resolver subagent at agents/merge-conflict-resolver.md declares model=sonnet plus tools=Read,Write,Edit,Bash with a system prompt for resolving conflict markers in a worktree and re-running the project test suite to confirm the resolution; Task tool displays a pass-or-fail verdict when the subagent exits</description>
+      </feature>
+      <feature index="40" shape="core"
+               touches_files="agents/boundaries-refactor.md">
+        <description>System boundaries-refactor subagent at agents/boundaries-refactor.md declares model=sonnet plus tools=Read,Write,Edit,Bash,Grep with a system prompt for applying one canonical refactor pattern (registry, split, extract_collaborators, or route_table) chosen from the audit report; Task tool displays the refactor verdict when the subagent exits</description>
+      </feature>
+    </category>
+
+    <category name="CI &amp; Quality Gates">
+      <feature index="41" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI/github-actions.yml defines a GitHub Actions workflow whose plugin-manifest-validation job runs JSON Schema validation against .claude-plugin/plugin.json on every PR; job displays validator output with exit code 0 when the manifest validates or exit code 1 otherwise</description>
+      </feature>
+      <feature index="42" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI workflow adds a markdown-lint job that runs markdownlint over the commands/, skills/, agents/, and docs/ trees; job displays lint findings with exit code 0 on zero findings or exit code 1 on any lint finding</description>
+      </feature>
+      <feature index="43" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI workflow adds a shell-lint job that runs shellcheck on every file under hooks/*.sh; job displays shellcheck output with exit code 0 on clean output or exit code 1 on any finding</description>
+      </feature>
+      <feature index="44" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI workflow adds the no-SDK invariant grep job: `grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' .` over the plugin tree (excluding docs/) must return zero matches; job displays the offending paths with exit code 1 on any hit per the PRD §9 invariant (hard fail)</description>
+      </feature>
+      <feature index="45" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI workflow adds a skill-structural-self-tests job that asserts every skill ships valid frontmatter, required sections, and trigger keywords (no LLM invocation in CI); job displays the per-skill fixture report with exit code 0 on green fixtures or exit code 1 on any structural deviation</description>
+      </feature>
+      <feature index="46" shape="core"
+               touches_files="CI/github-actions.yml">
+        <description>System CI workflow adds a cross-repo CLI-contract smoke test that checks out sidecar at MIN declared version and at HEAD, boots `claw-forge state start`, and exercises every contract-surface command from PRD §8 with synthetic args asserting documented JSON shape; job displays per-command JSON-shape diff and exits within 2 minutes per PR per the PRD §6 target</description>
+      </feature>
+    </category>
+
+    <category name="Testing &amp; Reference Fixtures">
+      <feature index="47" shape="core"
+               touches_files="tests/reference-specs/todo-app-5features/app_spec.xml">
+        <description>System reference fixture at tests/reference-specs/todo-app-5features/app_spec.xml is the canonical 5-feature toy TODO-app spec used as the manual pre-release completion-rate gate; manual end-to-end run displays ≥85% feature completion per the PRD §6 target</description>
+      </feature>
+      <feature index="48" shape="core"
+               touches_files="tests/smoke/run-reference-spec.sh">
+        <description>System tests/smoke/run-reference-spec.sh is the manual end-to-end runner that drives /claw-forge plan + /claw-forge run + /claw-forge merge against the todo-app fixture; script is deliberately excluded from CI to preserve the no-`claude -p` invariant and displays per-phase status with exit code 0 when all phases complete</description>
+      </feature>
+      <feature index="49" shape="core"
+               touches_files="tests/skills/**">
+        <description>System tests/skills/ directory ships per-skill structural fixtures that assert frontmatter fields, required sections, and trigger-keyword presence for every skill under skills/; CI feature 45 exercises the fixtures and displays a green report on success</description>
+      </feature>
+    </category>
+
+  </core_features>
+
+  <key_interactions>
+    <interaction number="1" name="Fresh install &amp; first greenfield run">
+      1. User runs `pip install claw-forge` (v0.6.0+)
+      2. User runs `/plugin install claw-forge` inside Claude Code
+      3. User cd's into a project dir, creates claw-forge.yaml, restarts the session
+      4. SessionStart hook detects the project, version-gates the sidecar, boots state service, prints banner
+      5. User runs `/claw-forge spec-create` → spec-authoring skill loads → produces app_spec.xml
+      6. User runs `/claw-forge plan` → sidecar parses spec, seeds DAG
+      7. User runs `/claw-forge run` → dispatch-loop skill loads → wave-by-wave Task calls until DAG complete
+      8. User runs `/claw-forge merge` → squash-merges all ready feature branches to target
+    </interaction>
+    <interaction number="2" name="Single-task bugfix on failure">
+      1. /claw-forge run completes with one failed task
+      2. User runs `/claw-forge fix &lt;task-id&gt;`
+      3. bugfix-loop skill loads, fetches task record + HANDOFF.md + prior commits via sidecar CLI
+      4. Dispatches bugfix-task subagent into the existing worktree with structured resume context
+      5. Subagent fixes the issue, commits, returns structured summary
+      6. /claw-forge merge picks up the now-passing branch
+    </interaction>
+    <interaction number="3" name="Migration from sidecar v0.5.x">
+      1. User runs `pip install -U claw-forge` (brings v0.6.0)
+      2. Existing claw-forge.yaml: providers: block now ignored (no error, no removal required)
+      3. agent.isolation: container setting now ignored (one-line warning at sidecar startup if set)
+      4. User runs `/plugin install claw-forge` inside Claude Code
+      5. Habit change: `claw-forge run` → `/claw-forge run`. Same for fix, merge, boundaries apply.
+      6. Existing .claw-forge/state.db continues to work unchanged
+    </interaction>
+  </key_interactions>
+
+  <implementation_steps>
+    <phase name="Phase 1: Repository scaffolding &amp; bootstrap">
+      Scaffold the repository layout per ARCHITECTURE §2 (commands/, skills/, agents/, hooks/, docs/, tests/, CI/)
+      Author .claude-plugin/plugin.json conforming to the official schema (name, version=0.1.0, license=Apache-2.0)
+      Add LICENSE (Apache-2.0) and .gitignore for runtime artefacts
+      Implement hooks/version-gte.sh semver helper with standalone tests
+      Implement hooks/ensure-sidecar.sh with project detection, version gate, state-service start, banner
+      Wire hooks/hooks.json to invoke ensure-sidecar.sh on SessionStart (startup|clear|compact)
+    </phase>
+    <phase name="Phase 2: Slash commands">
+      Author commands/plan.md, commands/run.md, commands/resume.md, commands/fix.md, commands/merge.md
+      Author commands/status.md, commands/session-status.md, commands/ui.md, commands/checkpoint.md
+      Author commands/stash-list.md, commands/stash-drop.md, commands/worktrees-list.md, commands/worktrees-prune.md, commands/export.md
+      Author commands/spec-create.md, commands/spec-import.md, commands/spec-validate.md, commands/spec-fix.md, commands/spec-expand.md
+      Author commands/boundaries-audit.md, commands/boundaries-apply.md
+    </phase>
+    <phase name="Phase 3: Skills &amp; subagents">
+      Author skills/claw-forge-dispatch-loop/SKILL.md encoding the wave-by-wave Task dispatch pattern
+      Author skills/claw-forge-feature-implementation/SKILL.md with workspace-boundary + structured-summary contract
+      Author skills/claw-forge-conflict-recovery/SKILL.md (replaces sidecar conflict_advisor.py)
+      Author skills/claw-forge-boundaries-refactor/SKILL.md and skills/claw-forge-spec-authoring/SKILL.md
+      Author skills/claw-forge-bugfix-loop/SKILL.md
+      Author agents/coding-feature.md, agents/bugfix-task.md, agents/feature-reviewer.md, agents/merge-conflict-resolver.md, agents/boundaries-refactor.md (all model=sonnet)
+    </phase>
+    <phase name="Phase 4: CI, testing &amp; documentation">
+      Write CI/github-actions.yml with all six jobs (manifest schema, markdownlint, shellcheck, no-SDK grep, skill self-tests, cross-repo smoke test)
+      Add tests/reference-specs/todo-app-5features/app_spec.xml as the manual completion-rate gate fixture
+      Add tests/smoke/run-reference-spec.sh as the manual end-to-end runner
+      Add tests/skills/ structural fixtures (one per skill)
+      Author README.md with install order + credit-pool motivation + hello-world walkthrough + sidecar-contract link
+      Author docs/migrating-to-plugin.md
+    </phase>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      Every slash command listed in PRD §7 is present, loads cleanly, and delegates correctly (skill load, sidecar CLI invocation, structured response)
+      /claw-forge run drives a complete dispatch loop end-to-end against the reference todo-app spec
+      /claw-forge fix recovers a deliberately-failed task and merges cleanly
+      SessionStart hook silently no-ops in non-claw-forge directories and prints the banner in claw-forge projects
+      Sidecar version-gate refuses sidecar &lt; 0.6.0 with a one-line upgrade hint and never aborts the session
+      Reference-spec end-to-end run achieves ≥85% feature completion rate (PRD §6 target)
+    </functionality>
+    <ux>
+      Two-command install: `pip install claw-forge` then `/plugin install claw-forge` — no Docker, no provider config, no API keys
+      Fresh install to first successful 5-feature greenfield run ≤ 5 minutes wall-clock (PRD §6 target)
+      Every user-facing error message is one line, imperative, with a concrete remediation
+      Plugin install + /plugin install claw-forge succeeds on stock macOS and Linux at ≥95% rate (PRD §6 target)
+    </ux>
+    <technical_quality>
+      Hard invariant: zero `claude_agent_sdk`, `claude-agent-sdk`, or `claude -p` references anywhere in the plugin tree (excluding docs/) — CI grep gate
+      Zero Python in the plugin tree (markdown + shell + plugin.json only) — PRD §9
+      Metered API spend during plugin run = $0.00 (hard invariant; non-zero = bug)
+      Every sidecar CLI subcommand listed in PRD §8 is exercised by the cross-repo smoke test with documented JSON shape
+      Markdown lints clean (markdownlint), shell lints clean (shellcheck), plugin.json validates against the official schema
+      CI smoke test runtime &lt; 2 minutes per PR (PRD §6 target)
+      No secrets committed (no API keys; the plugin uses the host CC session's auth exclusively)
+    </technical_quality>
+  </success_criteria>
+
+</project_specification>
