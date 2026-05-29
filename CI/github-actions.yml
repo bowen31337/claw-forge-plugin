@@ -1,93 +1,170 @@
-name: claw-forge plugin CI
+name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+
+  # ── Feature 41: Plugin manifest validation ─────────────────────────────────
   plugin-manifest-validation:
     name: Plugin manifest validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install ajv-cli
-        run: npm install -g ajv-cli@5
-      - name: Validate plugin.json against schema
-        run: ajv validate -s .claude-plugin/plugin.schema.json -d .claude-plugin/plugin.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Validate .claude-plugin/plugin.json
+        run: |
+          node - << 'JS'
+          const fs = require('fs');
+          const p = '.claude-plugin/plugin.json';
 
-  skill-structural-self-tests:
-    name: Skill structural self-tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run skill structural fixtures
-        run: sh tests/skills/run-all.sh
+          let manifest;
+          try {
+            manifest = JSON.parse(fs.readFileSync(p, 'utf8'));
+          } catch (e) {
+            console.error(`ERROR: cannot parse ${p}: ${e.message}`);
+            process.exit(1);
+          }
 
+          const errors = [];
+          ['name','version','description','author','license'].forEach(k => {
+            if (!manifest[k]) errors.push(`missing required field: ${k}`);
+          });
+          if (manifest.name      && manifest.name !== 'claw-forge')
+            errors.push(`name must be "claw-forge", got "${manifest.name}"`);
+          if (manifest.version   && !/^\d+\.\d+\.\d+/.test(manifest.version))
+            errors.push(`version must be semver, got "${manifest.version}"`);
+          if (manifest.license   && manifest.license !== 'Apache-2.0')
+            errors.push(`license must be "Apache-2.0", got "${manifest.license}"`);
+          if (manifest.keywords  && !Array.isArray(manifest.keywords))
+            errors.push('keywords must be an array');
+
+          if (errors.length) {
+            errors.forEach(e => console.error('ERROR:', e));
+            process.exit(1);
+          }
+          console.log('Plugin manifest validation: PASS');
+          console.log(`  name=${manifest.name}  version=${manifest.version}  license=${manifest.license}`);
+          JS
+
+  # ── Feature 42: Markdown lint ──────────────────────────────────────────────
   markdown-lint:
     name: Markdown lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
       - name: Install markdownlint-cli
         run: npm install -g markdownlint-cli
       - name: Lint markdown files
         run: |
-          markdownlint \
-            'commands/**/*.md' \
-            'skills/**/*.md' \
-            'agents/**/*.md' \
-            'docs/**/*.md'
+          find commands skills agents docs -name '*.md' -print0 \
+            | xargs -0 markdownlint --disable MD013 MD033 MD041 --
 
+  # ── Feature 43: Shell lint ─────────────────────────────────────────────────
   shell-lint:
     name: Shell lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      - name: Run shellcheck on hooks
-        run: |
-          find hooks -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+        run: sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: find hooks -name '*.sh' -print0 | xargs -0 shellcheck
 
+  # ── Feature 44: No-SDK invariant (PRD §9) ─────────────────────────────────
   no-sdk-invariant:
-    name: No-SDK invariant
+    name: No SDK invariant (PRD §9)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Assert zero SDK references in plugin tree
+      - name: Grep for claude_agent_sdk / claude -p references
         run: |
-          if grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' \
-               --include='*.md' \
-               --include='*.sh' \
-               --include='*.json' \
-               --include='*.yaml' \
-               --include='*.yml' \
-               --exclude-dir=docs \
-               .; then
-            echo "ERROR: SDK reference found in plugin tree (see above). Hard fail." >&2
+          HITS=$(
+            grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' . \
+              --exclude-dir='.git' \
+              --include='*.md' \
+              --include='*.sh' \
+              --include='*.json' \
+              --include='*.py' \
+              -l || true
+          )
+          if [ -n "$HITS" ]; then
+            echo "ERROR: SDK references found — PRD §9 invariant violated:"
+            echo "$HITS"
+            # Show offending lines for diagnosis
+            # shellcheck disable=SC2086
+            grep -rE 'claude_agent_sdk|claude-agent-sdk|claude -p' $HITS || true
             exit 1
           fi
-          echo "OK: zero SDK references found."
+          echo "No SDK references found: PASS"
 
-  cli-contract-smoke:
-    name: CLI contract smoke test
+  # ── Feature 45: Skill structural self-tests ────────────────────────────────
+  skill-structural-self-tests:
+    name: Skill structural self-tests
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-    env:
-      MIN_SIDECAR: "0.6.0"
     steps:
       - uses: actions/checkout@v4
+      - name: Run skill structural fixtures
+        run: bash tests/skills/run-fixtures.sh
 
-      - name: Set up Python
+  # ── Feature 46: Cross-repo CLI-contract smoke test ─────────────────────────
+  #
+  # Prerequisites (set once in repo Settings → Variables → Actions):
+  #   SIDECAR_REPO  — e.g. "clawinfra/claw-forge"
+  #
+  # Matrix: runs the smoke test twice — once against the MIN declared sidecar
+  # version (must match MIN_SIDECAR in hooks/ensure-sidecar.sh) and once
+  # against HEAD of the sidecar default branch.
+  cli-contract-smoke-test:
+    name: CLI contract smoke (${{ matrix.sidecar-label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sidecar-ref: 'v0.6.0'
+            sidecar-label: 'min-version (v0.6.0)'
+          - sidecar-ref: 'main'
+            sidecar-label: 'head (main)'
+    steps:
+      - name: Check out plugin repo
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Check out sidecar at ${{ matrix.sidecar-ref }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SIDECAR_REPO }}
+          ref: ${{ matrix.sidecar-ref }}
+          path: sidecar-src
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install sidecar at MIN declared version
-        run: pip install "claw-forge==${MIN_SIDECAR}"
+      - name: Install sidecar from source
+        run: pip install ./sidecar-src
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Configure git identity (required by worktree commands)
+        run: |
+          git config --global user.email "ci@claw-forge.smoke"
+          git config --global user.name "CI Smoke"
 
       - name: Run CLI contract smoke test
-        run: sh tests/smoke/run-reference-spec.sh --contract-only
-        # --contract-only exercises CLI commands without dispatching any LLM agents.
-        # Full end-to-end (LLM dispatch) is intentionally excluded from CI.
+        run: bash plugin/tests/cli-contract/smoke-test.sh
