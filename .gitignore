@@ -40,3 +40,4 @@ coverage/
 CLAUDE.md
 run.sh
 .env.tpl
+claw-forge.yaml

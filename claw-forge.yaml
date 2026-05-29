@@ -48,7 +48,7 @@ pool:
 providers:
   # Claude OAuth — run `claude setup-token` once, paste token into .env
   claude-oauth-1:
-    enabled: true
+    enabled: false
     oauth_token: ${OAUTH_TOKEN_A}
     priority: 1
     type: anthropic_oauth
